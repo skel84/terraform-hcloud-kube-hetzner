@@ -153,4 +153,18 @@ variable "agent_nodepools" {
     error_message = "Set either nodes or count per agent_nodepool, not both."
   }
 
+  validation {
+    condition = alltrue([for agent_nodepool in var.agent_nodepools :
+      alltrue([for agent_key, agent_node in coalesce(agent_nodepool.nodes, {}) : can(tonumber(agent_key)) && tonumber(agent_key) == floor(tonumber(agent_key)) && 0 <= tonumber(agent_key) && tonumber(agent_key) < 154])
+    ])
+    # 154 because the private ip is derived from tonumber(key) + 101. See private_ipv4 in agents.tf
+    error_message = "The key for each individual node in a nodepool must be a stable integer in the range [0, 153] cast as a string."
+  }
 
+  validation {
+    condition = sum([for agent_nodepool in var.agent_nodepools : length(coalesce(agent_nodepool.nodes, {})) + coalesce(agent_nodepool.count, 0)]) <= 100
+    # 154 because the private ip is derived from tonumber(key) + 101. See private_ipv4 in agents.tf
+    error_message = "Hetzner does not support networks with more than 100 servers."
+  }
+
+}
