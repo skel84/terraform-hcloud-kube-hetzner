@@ -2,9 +2,11 @@ resource "hcloud_load_balancer" "cluster" {
   count = local.has_external_load_balancer ? 0 : 1
   name  = local.load_balancer_name
 
+
   load_balancer_type = var.load_balancer.ingress.type
   location           = var.load_balancer.ingress.location
   labels             = local.labels.general
+  delete_protection  = var.enable_delete_protection.load_balancer
 
   algorithm {
     type = var.load_balancer.ingress.algorithm
@@ -37,6 +39,7 @@ resource "null_resource" "first_control_plane" {
           token                       = local.k3s.token
           cluster-init                = true
           disable-cloud-controller    = true
+          disable-kube-proxy          = var.disable_kube_proxy
           disable                     = local.k3s.disable_extras
           kubelet-arg                 = local.kubelet_arg
           kube-controller-manager-arg = local.kube_controller_manager_arg
@@ -57,7 +60,8 @@ resource "null_resource" "first_control_plane" {
           tls-san = concat([module.control_planes[keys(module.control_planes)[0]].ipv4_address], var.additional_tls_sans)
         },
         local.etcd_s3_snapshots,
-        var.nodepools.control_planes_custom_config
+        var.nodepools.control_planes_custom_config,
+        (module.control_planes[keys(module.control_planes)[0]].selinux == true ? { selinux = true } : {})
       )
     )
 

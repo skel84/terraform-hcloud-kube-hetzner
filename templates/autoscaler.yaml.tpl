@@ -141,18 +141,16 @@ spec:
       tolerations:
         - effect: NoSchedule
           key: node-role.kubernetes.io/control-plane
-        - effect: NoSchedule
-          key: node-role.kubernetes.io/master
 
       # Node affinity is used to force cluster-autoscaler to stick
-      # to the master node. This allows the cluster to reliably downscale
+      # to the control-plane node. This allows the cluster to reliably downscale
       # to zero worker nodes when needed.
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - key: node-role.kubernetes.io/master
+                  - key: node-role.kubernetes.io/control-plane
                     operator: Exists
       containers:
         - image: ${ca_image}:${ca_version}
@@ -164,6 +162,8 @@ spec:
             requests:
               cpu: 100m
               memory: 300Mi
+          ports:
+            - containerPort: 8085
           command:
             - ./cluster-autoscaler
             - --v=${cluster_autoscaler_log_level}
@@ -194,6 +194,10 @@ spec:
             value: '${ipv4_subnet_id}'
           - name: HCLOUD_FIREWALL
             value: '${firewall_id}'
+          %{~ if cluster_autoscaler_server_creation_timeout != "" ~}
+          - name: HCLOUD_SERVER_CREATION_TIMEOUT
+            value: '${cluster_autoscaler_server_creation_timeout}'
+          %{~ endif ~}
           volumeMounts:
             - name: ssl-certs
               mountPath: /etc/ssl/certs

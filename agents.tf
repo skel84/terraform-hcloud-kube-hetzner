@@ -7,7 +7,7 @@ module "agents" {
 
   for_each = local.agent_nodes
 
-  name                         = "${var.use_cluster_name_in_node_name ? "${var.cluster_name}-" : ""}${each.value.nodepool_name}"
+  name                         = "${var.use_cluster_name_in_node_name ? "${var.cluster_name}-" : ""}${each.value.nodepool_name}${try(each.value.node_name_suffix, "")}"
   microos_snapshot_id          = substr(each.value.server_type, 0, 3) == "cax" ? data.hcloud_image.microos_arm_snapshot.id : data.hcloud_image.microos_x86_snapshot.id
   base_domain                  = var.base_domain
   ssh_keys                     = length(var.ssh.hcloud_key_label) > 0 ? concat([local.ssh.hcloud_ssh_key_id], data.hcloud_ssh_keys.keys_by_selector[0].ssh_keys.*.id) : [local.ssh.hcloud_ssh_key_id]
@@ -16,7 +16,7 @@ module "agents" {
   ssh_private_key              = var.ssh_private_key
   ssh_additional_public_keys   = length(var.ssh.hcloud_key_label) > 0 ? concat(var.ssh.additional_public_keys, data.hcloud_ssh_keys.keys_by_selector[0].ssh_keys.*.public_key) : var.ssh.additional_public_keys
   firewall_ids                 = [hcloud_firewall.k3s.id]
-  placement_group_id           = var.placement_group_disable ? null : hcloud_placement_group.agent[floor(index(keys(local.agent_nodes), each.key) / 10)].id
+  placement_group_id           = var.placement_group_disable ? null : (each.value.placement_group == null ? hcloud_placement_group.agent[each.value.placement_group_compat_idx].id : hcloud_placement_group.agent_named[each.value.placement_group].id)
   location                     = each.value.location
   server_type                  = each.value.server_type
   backups                      = each.value.backups
@@ -27,6 +27,7 @@ module "agents" {
   cloudinit_write_files_common = local.cloudinit.write_files_common
   cloudinit_runcmd_common      = local.cloudinit.runcmd_common
   swap_size                    = each.value.swap_size
+  zram_size                    = each.value.zram_size
 
   private_ipv4 = cidrhost(hcloud_network_subnet.agent[[for i, v in var.nodepools.agents : i if v.name == each.value.nodepool_name][0]].ip_range, each.value.index + 101)
 
@@ -51,8 +52,9 @@ locals {
       node-ip       = module.agents[k].private_ipv4_address
       node-label    = v.labels
       node-taint    = v.taints
-      selinux       = true
     },
+    var.agent_nodes_custom_config,
+    (v.selinux == true ? { selinux = true } : {})
   ) }
 }
 
@@ -135,11 +137,13 @@ resource "hcloud_volume" "longhorn_volume" {
     cluster     = var.cluster_name
     scope       = "longhorn"
   }
-  name      = "${var.cluster_name}-longhorn-${module.agents[each.key].name}"
-  size      = local.agent_nodes[each.key].longhorn_volume_size
-  server_id = module.agents[each.key].id
-  automount = true
-  format    = var.csi.longhorn.fstype
+  name              = "${var.cluster_name}-longhorn-${module.agents[each.key].name}"
+  size              = local.agent_nodes[each.key].longhorn_volume_size
+  server_id         = module.agents[each.key].id
+  automount         = true
+  format            = var.csi.longhorn.fstype
+  delete_protection = var.enable_delete_protection.volume
+
 }
 
 resource "null_resource" "configure_longhorn_volume" {
@@ -175,9 +179,10 @@ resource "null_resource" "configure_longhorn_volume" {
 resource "hcloud_floating_ip" "agents" {
   for_each = { for k, v in local.agent_nodes : k => v if coalesce(lookup(v, "floating_ip"), false) }
 
-  type          = "ipv4"
-  labels        = local.labels.general
-  home_location = each.value.location
+  type              = "ipv4"
+  labels            = local.labels.general
+  home_location     = each.value.location
+  delete_protection = var.enable_delete_protection.floating_ip
 }
 
 resource "hcloud_floating_ip_assignment" "agents" {

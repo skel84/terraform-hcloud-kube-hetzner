@@ -8,7 +8,11 @@
   <h2 align="center">Kube-Hetzner</h2>
 
   <p align="center">
-    A highly optimized, easy-to-use, auto-upgradable, HA-default & Load-Balanced, Kubernetes cluster powered by k3s-on-MicroOS and deployed for peanuts on <a href="https://hetzner.com" target="_blank">Hetzner Cloud</a> 🤑 🚀
+    A highly optimized, easy-to-use, auto-upgradable, HA-default & Load-Balanced, Kubernetes cluster powered by k3s-on-MicroOS and deployed for peanuts on <a href="https://hetzner.com" target="_blank">Hetzner Cloud</a> 🤑
+  </p>
+  <hr />
+    <p align="center">
+    🔥 Introducing <a href="https://chat.openai.com/g/g-UEqjc2qiW-kh-assistant" target="_blank">KH Assistant</a>, our Custom-GPT kube.tf generator to get you going fast, just tell it what you need! 🚀
   </p>
   <hr />
 </p>
@@ -168,7 +172,14 @@ _You can also use it in an automated flow, in which case `create_kubeconfig` sho
 
 The default is Flannel, but you can also choose Calico or Cilium, by setting the `cni_plugin` variable in `kube.tf` to "calico" or "cilium".
 
+### Cilium
+
 As Cilium has a lot of interesting and powerful config possibilities, we give you the ability to configure Cilium with the helm `cilium_values` variable (see the cilium specific [helm values](https://github.com/cilium/cilium/blob/master/install/kubernetes/cilium/values.yaml)) before you deploy your cluster.
+
+Cilium supports full kube-proxy replacement. Cilium runs by default in hybrid kube-proxy replacement mode. To achieve a completely kube-proxy-free cluster, set `disable_kube_proxy = true`.
+
+It is also possible to enable Hubble using `cilium_hubble_enabled = true`. In order to access the Hubble UI, you need to port-forward the Hubble UI service to your local machine. By default, you can do this by running `kubectl port-forward -n kube-system service/hubble-ui 12000:80` and then opening `http://localhost:12000` in your browser. 
+However, it is recommended to use the [Cilium CLI](https://docs.cilium.io/en/stable/gettingstarted/k8s-install-default/#install-the-cilium-cli) and [Hubble Client](https://docs.cilium.io/en/stable/gettingstarted/k8s-install-default/#install-the-cilium-cli) and running the `cilium hubble ui` command.
 
 ## Scaling Nodes
 
@@ -179,6 +190,8 @@ There are some limitations (to scaling down mainly) that you need to be aware of
 _Once the cluster is up; you can change any nodepool count and even set it to 0 (in the case of the first control-plane nodepool, the minimum is 1); you can also rename a nodepool (if the count is to 0), but should not remove a nodepool from the list after once the cluster is up. That is due to how subnets and IPs get allocated. The only nodepools you can remove are those at the end of each list of nodepools._
 
 _However, you can freely add other nodepools at the end of each list. And for each nodepools, you can freely increase or decrease the node count (if you want to decrease a nodepool node count make sure you drain the nodes in question before, you can use `terraform show` to identify the node names at the end of the nodepool list, otherwise, if you do not drain the nodes before removing them, it could leave your cluster in a bad state). The only nodepool that needs to have always at least a count of 1 is the first control-plane nodepool._
+
+_An advanced usecase is to replace the count of a nodepool by a map with each key representing a single node. In this case, you can add and remove individual nodes from a pool by adding and removing their entries in this map, and it allows you to set individual labels and other parameters on each node in the pool. See kube.tf.example for an example._
 
 ## Autoscaling Node Pools
 
@@ -218,25 +231,33 @@ All options from the [docs](https://kured.dev/docs/configuration/) are available
 
 _If you wish to turn off automatic MicroOS upgrades (Important if you are not launching an HA setup that requires at least 3 control-plane nodes), you need to set:_
 
-```terraform
+```tf
 automatically_upgrade_os = false
 ```
 
-_Alternatively ssh into each node and issue the following command:_
+Alternatively ssh into each node and issue the following command:
 
 ```sh
 systemctl --now disable transactional-update.timer
 ```
 
-_If you wish to turn off automatic k3s upgrades, you need to set:_
+If you wish to turn off automatic k3s upgrades, you need to set:
 
-```terraform
+```tf
 automatically_upgrade_k3s = false
 ```
 
+<<<<<<< HEAD
 \_Alternatively, you can either remove the `k3s_upgrade=true` label or set it to `false`. This needs to happen for all the nodes too! To remove the node label completely, apply `-` at the end of the label:
+=======
+_Once disabled this way you selectively can enable the upgrade by setting the node label `k3s_update=true` and later disable it by removing the label or set it to `false` again._
+>>>>>>> master
 
 ```sh
+# Enable upgrade for a node (use --all for all nodes)
+kubectl label --overwrite node <node-name> k3s_upgrade=true
+
+# Later disable upgrade by removing the label (use --all for all nodes)
 kubectl label node <node-name> k3s_upgrade-
 ```
 
@@ -250,7 +271,7 @@ kubectl delete plan k3s-server -n system-upgrade
 Also, note that after turning off node upgrades, you will need to manually upgrade the nodes when needed. You can do so by SSH'ing into each node and running the following commands (and don't forget to drain the node before with `kubectl drain <node-name>`):
 
 ```sh
-transactional-update
+systemctl start transactional-update.service
 reboot
 ```
 
@@ -294,7 +315,7 @@ After the initial bootstrapping of your Kubernetes cluster, you might want to de
 
 However, some applications that e.g. provide custom CRDs (e.g. [ArgoCD](https://argoproj.github.io/cd/)) need a different deployment strategy: one has to deploy CRDs first, then wait for the deployment, before being able to install the actual application. In the ArgoCD case, not waiting for the CRD setup to finish will cause failures. Therefore, an additional mechanism is available to support these kind of deployments. Specify `extra_kustomize_deployment_commands` in your `kube.tf` file containing a series of commands to be executed, after the `Kustomization` step finished:
 
-```
+```tf
   extra_kustomize_deployment_commands = <<-EOT
     kubectl -n argocd wait --for condition=established --timeout=120s crd/appprojects.argoproj.io
     kubectl -n argocd wait --for condition=established --timeout=120s crd/applications.argoproj.io
@@ -394,6 +415,8 @@ EOT
 Deploy the K8S cluster infrastructure.
 
 See the Cilium documentation for further steps (policy writing and testing): [Writing egress gateway policies](https://docs.cilium.io/en/stable/network/egress-gateway/)
+
+There are 3 different ways to define egress policies related to the gateway node. You can specify the interface, the egress IP (Floating IP) or nothing, which pics the first IPv4 address of the the interface of the default route.
 
 CiliumEgressGatewayPolicy example:
 
@@ -513,9 +536,17 @@ When doing so, `automatically_upgrade_os` should be set to `false`, especially w
 
 <summary>Use in Terraform cloud</summary>
 
-To use Kube-Hetzner on Terraform cloud, use as a Terraform module as mentioned above, but also change the execution mode from `remote` to `local`.
+You can use Kube-Hetzner on Terraform cloud just as you would from a local deployment:
 
-Also make sure you have the OS snapshot already created in your project, for that, follow the installation script.
+1. Make sure you have the OS snapshot already created in your project (follow the installation script to achieve this).
+2. Use the content of your public and private key to configure `ssh_public_key` and `ssh_private_key`. Make sure the private key is _not_ password protected. Since your private key is sensitive, it is recommended to add them as variables (make sure to mark the private key as a sensitive variable in Terraform Cloud!) and assign it in your `kube.tf`:
+
+   ```tf
+   ssh_public_key = var.ssh_public_key
+   ssh_private_key = var.ssh_private_key
+   ```
+
+   _Note_: If you want to use a password protected private key, you will have to point `ssh_private_key` to a file containing this key. You must host this file in an environment that you control and a `ssh-agent` to decipher it for you. Hence, on Terraform Cloud, change the `execution mode` to `local` and run your own Terraform agent in this environment.
 
 </details>
 
@@ -632,7 +663,7 @@ For more details, see [Longhorn's documentation](https://longhorn.io/docs/1.4.0/
 
 To enable the [PodNodeSelector and optionally the PodTolerationRestriction](https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/#podnodeselector) api modules, set the following value:
 
-```terraform
+```tf
 k3s_exec_server_args = "--kube-apiserver-arg enable-admission-plugins=PodTolerationRestriction,PodNodeSelector"
 ```
 
@@ -813,7 +844,7 @@ and you use subnet 10.128.0.0/9 for your non-k3s business, then adapting
 
 For example
 
-```
+```tf
 resource "hcloud_network" "k3s_proxied" {
   name     = "k3s-proxied"
   ip_range = "10.0.0.0/8"
@@ -852,6 +883,118 @@ module "kube-hetzner" {
 ```
 
 NOTE: square brackets in existing_network_id! This must be a list of length 1.
+
+</details>
+<details>
+<summary>Placement groups</summary>
+Up until release v2.11.8, there was an implementation error in the placement group logic.
+
+If you have fewer than 10 agents and 10 control-plane nodes, you can continue using the code as is.
+
+If you have a single pool with a count >= 10, you could only work with global setting in kube.tf:
+
+```tf
+placement_group_disable = true
+```
+
+Now you can assign each nodepool to its own placement group, preferrably using named groups:
+
+```tf
+  agent_nodepools = [
+    {
+      ...
+      placement_group = "special"
+    },
+  ]
+```
+
+You can also continue using the previous code-base like this:
+
+```tf
+  agent_nodepools = [
+    {
+      ...
+      placement_group_compat_idx = 1
+    },
+  ]
+```
+
+Finally, if you want to have a node-pool with more than 10 nodes, you have to use the map-based node definition and assign individual nodes to groups:
+
+```tf
+  agent_nodepools = [
+    {
+      ...
+      nodes = {
+        "0" : {
+          placement_group = "pg-1",
+        },
+        ...
+        "30" : {
+          placement_group = "pg-2",
+        },
+      }
+    },
+  ]
+```
+
+</details>
+<details>
+<summary>Migratings from count-based nodepools to map-based</summary>
+
+Migrating from `count` to map-based `nodes` is easy, but it is crucial
+that you set append_index_to_node_name to false, otherwise the nodes get
+replaced. The default for newly added nodes is true, so you can
+easily map between your nodes and your kube.tf file.
+
+```tf
+  agent_nodepools = [
+    {
+      name        = "agent-large",
+      server_type = "cpx21",
+      location    = "nbg1",
+      labels      = [],
+      taints      = [],
+      # count       = 2
+      nodes = {
+        "0" : {
+          append_index_to_node_name = false,
+          labels = ["my.extra.label=special"],
+          placement_group = "agent-large-pg-1",
+        },
+        "1" : {
+          append_index_to_node_name = false,
+          server_type = "cpx31",
+          labels = ["my.extra.label=slightlybiggernode"]
+          placement_group = "agent-large-pg-2",
+        },
+      }
+    },
+  ]
+```
+
+</details>
+<details>
+<summary>Use of delete protection</summary>
+
+Use of delete protection feature in Hetzner Cloud on resources can be used to protect resources from deletion by putting a "lock" on them.
+
+Please note, that this does not protect deletion from Terraform itself, as the Provider will lift the lock in that case. The resources will only be protected from deletion via the Hetzner Cloud Console or API.
+
+There are following resources that support delete protection, which is set to `false` by default:
+
+- Floating IPs
+- Load Balancers
+- Volumes (used by Longhorn)
+
+Example scenario where you want to ensure you keep a floating IP that is whitelisted in some firewall so you don't lose access to certain resources or have to wait for the new IP being whitelisted.
+This is how you can enable delete protection for floating IPs with _terraform.tfvars_:
+
+```tf
+enable_delete_protection = {
+  floating_ip = true
+}
+```
 
 </details>
 
